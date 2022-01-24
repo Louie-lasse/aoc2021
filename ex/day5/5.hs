@@ -1,44 +1,53 @@
-import Parsing ( digit, oneOrMore, parse )
-import CostCentre (CostCentre(cc_loc))
-main :: IO ()
+import Data.Functor ( (<&>) )
+import Graphics.UI.Threepenny (lineTo)
 main = do
-    ns <- map getNums . lines <$> readFile "input.txt"
-    let maxN = maximum $ concat ns
-    let matrix = genMatrix (maxN+1)
-    let poss = concatMap (crossings . posPair) ns
-    let cross = concat $ foldr inc matrix poss
-    print $ length $ filter (>1) cross
+    lines <- readFile "input.txt" <&> map parseLine . lines
+    let world = createWorld lines
+    return $ countCommon $ foldr place world $ concatMap lineToCoords lines
 
-type Pos = (Int,Int)
-type Matrix = [[Int]]
+main' = do
+    readFile "tst.txt" >>= mapM_ (print . lineToCoords . parseLine) . lines
 
-(!!=) :: [a] -> (Int,a) -> [a]
-[]     !!= _     = error "index of !!= out of bounds"
-(x:xs) !!= (0,v) = v:xs
-(x:xs) !!= (n,v) = x : xs !!= (n-1,v)
+type Coord = (Int,Int)
 
-inc :: Pos -> Matrix -> Matrix
-inc (r,c) m = m !!= (r, m !! r !!= (c,m !! r !! c + 1))
+type Line = (Coord,Coord)
 
-genMatrix :: Int -> [[Int]]
-genMatrix n = replicate n [0 | _ <- [0..n]]
+type World = [[Int]]
 
-getNums :: String -> [Int]
-getNums [] = []
-getNums s  = case parse (oneOrMore digit) s of
-    Just (n,r) -> read n : getNums r
-    Nothing    ->          getNums $ drop 1 s
+parseLine :: String -> Line
+parseLine s | (fst,' ':'-':'>':' ':snd) <- break (==' ') s
+            = both parseCoord (fst,snd)
+            | otherwise = error $ "failed to parse line "++s
 
-posPair :: [Int] -> (Pos,Pos)
-posPair [x1,y1,x2,y2] = ((x1,y1),(x2,y2))
-posPair _             = error "not a valid list of positions"
+parseCoord :: String -> Coord
+parseCoord s | (x,',':y) <- break (==',') s
+             = both read (x,y)
+             | otherwise = error $ "failed to parse coord "++s
 
-crossings :: (Pos,Pos) -> [Pos]
-crossings (p1,p2) | p1 == p2  = [p1]
-                  | otherwise = p1 : crossings (p1 `closer` p2,p2)
-    where
-        closer (x1,y1) (x2,y2) = (x1 + diff x1 x2, y1 + diff y1 y2)
-        diff a b | a < b     =  1
-                 | a > b     = -1
-                 | otherwise =  0
+both :: (a->b) -> (a,a) -> (b,b)
+both f (a,b) = (f a,f b)
 
+isStraight :: Line -> Bool
+isStraight ((x1,y1),(x2,y2)) = x1==x2 || y1 == y2
+
+createWorld :: [Line] -> World
+createWorld lns = replicate maxY $ replicate maxX 0 where
+    maxX = 1 + maximum (concat [[x1,x2] | ((x1,_),(x2,_)) <- lns])
+    maxY = 1 + maximum (concat [[y1,y2] | ((_,y1),(_,y2)) <- lns])
+
+place :: Coord -> World -> World
+place (x,y) w | (uR,tR:lR) <- splitAt y w
+              , (lE,tE:rE) <- splitAt x tR
+              = uR ++ (lE++tE+1:rE) : lR
+              | otherwise = error $ "coudn't place at "++show (x,y)
+
+lineToCoords :: Line -> [Coord]
+lineToCoords (c1,c2) | c1 == c2 =[c1]
+                      | otherwise = c1 : lineToCoords (closer c1 c2,c2) where
+                          closer (x1,y1) (x2,y2) = (x1 `closerTo` x2, y1 `closerTo` y2)
+                          closerTo a b | a < b     = a + 1
+                                       | a > b     = a - 1
+                                       | otherwise = a
+
+countCommon :: World -> Int
+countCommon w = sum $ map (length . filter (>1)) w
